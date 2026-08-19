@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 // telegramProvider delivers messages to Telegram chats via the Bot API.
@@ -38,6 +39,14 @@ func (p *telegramProvider) Send(ctx context.Context, req *SendRequest) (*SendRes
 	payload := map[string]interface{}{
 		"chat_id": req.To,
 		"text":    body,
+	}
+	// Hide a sensitive substring (e.g. the OTP code) behind a spoiler entity.
+	if req.Spoiler != "" {
+		if idx := strings.Index(body, req.Spoiler); idx >= 0 {
+			payload["message_entities"] = []map[string]interface{}{
+				{"type": "spoiler", "offset": idx, "length": len(req.Spoiler)},
+			}
+		}
 	}
 	var out struct {
 		OK     bool `json:"ok"`

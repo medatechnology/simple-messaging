@@ -117,6 +117,35 @@ func TestTelegramSend(t *testing.T) {
 	}
 }
 
+func TestTelegramSpoiler(t *testing.T) {
+	var captured map[string]interface{}
+	c := newTestClient(t, ProviderConfig{Channel: "telegram", From: "bot-token"}, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/sendMessage" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		json.NewDecoder(r.Body).Decode(&captured)
+		w.Write([]byte(`{"ok":true,"result":{"message_id":42}}`))
+	})
+	_, err := c.SendOTP(context.Background(), &SendRequest{
+		Channel: ChannelTelegram, To: "12345",
+		Body: "Your login code is {code}", Code: "483920", Spoiler: "483920",
+	})
+	if err != nil {
+		t.Fatalf("SendOTP: %v", err)
+	}
+	if captured["text"] != "Your login code is 483920" {
+		t.Fatalf("text = %v", captured["text"])
+	}
+	ents, ok := captured["message_entities"].([]interface{})
+	if !ok || len(ents) != 1 {
+		t.Fatalf("message_entities = %v", captured["message_entities"])
+	}
+	e := ents[0].(map[string]interface{})
+	if e["type"] != "spoiler" || e["offset"] != float64(19) || e["length"] != float64(6) {
+		t.Fatalf("entity = %v", e)
+	}
+}
+
 func TestTelegramWebhook(t *testing.T) {
 	c := newTestClient(t, ProviderConfig{Channel: "telegram", From: "bot-token", SecretKey: "wh-secret"}, func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("no call expected")
