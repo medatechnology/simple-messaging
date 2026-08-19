@@ -146,6 +146,53 @@ func TestTelegramSpoiler(t *testing.T) {
 	}
 }
 
+func TestResolveTelegramChatID(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/getUpdates") {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		w.Write([]byte(`{"ok":true,"result":[
+			{"update_id":1,"message":{"chat":{"id":12345}}},
+			{"update_id":2,"message":{"chat":{"id":67890}}}
+		]}`))
+	}))
+	defer ts.Close()
+	client := &http.Client{Transport: &rewriteTransport{base: ts.URL}}
+	id, err := ResolveTelegramChatID(context.Background(), "token", client)
+	if err != nil {
+		t.Fatalf("ResolveTelegramChatID: %v", err)
+	}
+	if id != 67890 {
+		t.Fatalf("chat id = %d, want 67890 (most recent)", id)
+	}
+}
+
+func TestResolveTelegramChatIDNoUpdates(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"ok":true,"result":[]}`))
+	}))
+	defer ts.Close()
+	client := &http.Client{Transport: &rewriteTransport{base: ts.URL}}
+	if _, err := ResolveTelegramChatID(context.Background(), "token", client); err == nil {
+		t.Fatal("expected error with no updates")
+	}
+}
+
+// rewriteTransport reroutes requests to a test server while keeping the
+// request path/query intact (used to exercise api.telegram.org call sites).
+type rewriteTransport struct {
+	base string
+}
+
+func (t *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	u := *req.URL
+	u.Scheme = "http"
+	u.Host = strings.TrimPrefix(strings.TrimPrefix(t.base, "http://"), "https://")
+	req2 := req.Clone(req.Context())
+	req2.URL = &u
+	return http.DefaultTransport.RoundTrip(req2)
+}
+
 func TestTelegramWebhook(t *testing.T) {
 	c := newTestClient(t, ProviderConfig{Channel: "telegram", From: "bot-token", SecretKey: "wh-secret"}, func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("no call expected")

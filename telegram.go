@@ -68,6 +68,33 @@ func (p *telegramProvider) Send(ctx context.Context, req *SendRequest) (*SendRes
 	}, nil
 }
 
+// ResolveTelegramChatID returns the chat id of the most recent update for a
+// bot token, so callers can auto-fill the target chat during setup. The
+// operator must have messaged the bot at least once. Generic and reusable —
+// setup wizards should use this instead of guessing chat ids.
+func ResolveTelegramChatID(ctx context.Context, token string, httpClient *http.Client) (int64, error) {
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	var out struct {
+		OK     bool `json:"ok"`
+		Result []struct {
+			Message struct {
+				Chat struct {
+					ID int64 `json:"id"`
+				} `json:"chat"`
+			} `json:"message"`
+		} `json:"result"`
+	}
+	if err := doJSON(ctx, httpClient, http.MethodGet, "https://api.telegram.org/bot"+token+"/getUpdates", nil, &out, &map[string]interface{}{}, nil); err != nil {
+		return 0, err
+	}
+	if !out.OK || len(out.Result) == 0 {
+		return 0, fmt.Errorf("simplemessage: telegram has no updates yet — message your bot first")
+	}
+	return out.Result[len(out.Result)-1].Message.Chat.ID, nil
+}
+
 func (p *telegramProvider) apiBase() string {
 	if p.cfg.BaseURL != "" {
 		return p.cfg.BaseURL
