@@ -40,6 +40,14 @@ func (p *telegramProvider) Send(ctx context.Context, req *SendRequest) (*SendRes
 		"chat_id": req.To,
 		"text":    body,
 	}
+	// Telegram forum/topic groups address a thread with message_thread_id.
+	if req.ThreadID != "" {
+		tid, err := strconv.ParseInt(strings.TrimSpace(req.ThreadID), 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("simplemessage: telegram ThreadID %q is not a number", req.ThreadID)
+		}
+		payload["message_thread_id"] = tid
+	}
 	// Hide a sensitive substring (e.g. the OTP code) behind a spoiler entity.
 	if req.Spoiler != "" {
 		if idx := strings.Index(body, req.Spoiler); idx >= 0 {
@@ -93,6 +101,41 @@ func ResolveTelegramChatID(ctx context.Context, token string, httpClient *http.C
 		return 0, fmt.Errorf("simplemessage: telegram has no updates yet — message your bot first")
 	}
 	return out.Result[len(out.Result)-1].Message.Chat.ID, nil
+}
+
+// ResolveTelegramTopic returns the most recent forum-topic thread id
+// (`message_thread_id`) seen for a chat, so setup can target a topic. The
+// operator must post once in the target topic first (a normal group has none,
+// in which case this errors and the caller simply sends to the chat).
+func ResolveTelegramTopic(ctx context.Context, token, chatID string, httpClient *http.Client) (int64, error) {
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	want, err := strconv.ParseInt(strings.TrimSpace(chatID), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("simplemessage: chat id %q is not a number", chatID)
+	}
+	var out struct {
+		OK     bool `json:"ok"`
+		Result []struct {
+			Message struct {
+				Chat struct {
+					ID int64 `json:"id"`
+				} `json:"chat"`
+				ThreadID int64 `json:"message_thread_id"`
+			} `json:"message"`
+		} `json:"result"`
+	}
+	if err := doJSON(ctx, httpClient, http.MethodGet, "https://api.telegram.org/bot"+token+"/getUpdates", nil, &out, &map[string]interface{}{}, nil); err != nil {
+		return 0, err
+	}
+	for i := len(out.Result) - 1; i >= 0; i-- {
+		m := out.Result[i].Message
+		if m.Chat.ID == want && m.ThreadID != 0 {
+			return m.ThreadID, nil
+		}
+	}
+	return 0, fmt.Errorf("simplemessage: no topic thread found for chat %s — post once inside the topic (or leave topic blank for a normal group)", chatID)
 }
 
 func (p *telegramProvider) apiBase() string {

@@ -346,3 +346,42 @@ func TestFonnteWebhook(t *testing.T) {
 		t.Fatal("expected token mismatch")
 	}
 }
+
+func TestTelegramSendWithThread(t *testing.T) {
+	var captured map[string]interface{}
+	c := newTestClient(t, ProviderConfig{Channel: "telegram", From: "bot-token"}, func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&captured)
+		w.Write([]byte(`{"ok":true,"result":{"message_id":7}}`))
+	})
+	if _, err := c.SendMessage(context.Background(), &SendRequest{Channel: ChannelTelegram, To: "-100", ThreadID: "42", Body: "hi"}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if captured["message_thread_id"] != float64(42) {
+		t.Fatalf("message_thread_id = %v, want 42", captured["message_thread_id"])
+	}
+	if _, err := c.SendMessage(context.Background(), &SendRequest{Channel: ChannelTelegram, To: "-100", ThreadID: "abc", Body: "hi"}); err == nil {
+		t.Fatal("expected a non-numeric ThreadID to error")
+	}
+}
+
+func TestResolveTelegramTopic(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"ok":true,"result":[
+			{"update_id":1,"message":{"chat":{"id":-100},"message_thread_id":5}},
+			{"update_id":2,"message":{"chat":{"id":-100},"message_thread_id":9}},
+			{"update_id":3,"message":{"chat":{"id":-200},"message_thread_id":99}}
+		]}`))
+	}))
+	defer ts.Close()
+	client := &http.Client{Transport: &rewriteTransport{base: ts.URL}}
+	id, err := ResolveTelegramTopic(context.Background(), "token", "-100", client)
+	if err != nil {
+		t.Fatalf("ResolveTelegramTopic: %v", err)
+	}
+	if id != 9 {
+		t.Fatalf("thread id = %d, want 9", id)
+	}
+	if _, err := ResolveTelegramTopic(context.Background(), "token", "-999", client); err == nil {
+		t.Fatal("expected error when the chat has no topic")
+	}
+}

@@ -51,6 +51,9 @@ type SendRequest struct {
 	Subject     string            // email subject / message title
 	Body        string            // plain-text body; "{code}" is replaced with the OTP when present
 	Spoiler     string            // substring of Body hidden behind a spoiler entity (Telegram message_entities); empty = no spoiler
+	// ThreadID targets a thread/topic (Telegram forum topic `message_thread_id`);
+	// empty = the chat's general stream.
+	ThreadID string
 	TemplateName   string         // vendor template name (WhatsApp); Body used when empty
 	TemplateParams map[string]string
 
