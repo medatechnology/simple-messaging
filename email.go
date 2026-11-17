@@ -2,9 +2,12 @@ package simplemessage
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"mime"
 	"net"
 	"net/http"
+	"net/mail"
 	"net/smtp"
 	"strings"
 	"time"
@@ -27,7 +30,7 @@ func newEmailProvider(cfg ProviderConfig, _ *http.Client) (Provider, error) {
 	if cfg.From == "" {
 		return nil, fmt.Errorf("simplemessage: email requires From (sender address)")
 	}
-	if !strings.Contains(cfg.From, "@") {
+	if address, err := mail.ParseAddress(cfg.From); err != nil || address.Address != cfg.From || strings.ContainsAny(cfg.From, "\r\n") {
 		return nil, fmt.Errorf("simplemessage: email From must be a valid address, got %q", cfg.From)
 	}
 	return &emailProvider{cfg: cfg}, nil
@@ -35,8 +38,11 @@ func newEmailProvider(cfg ProviderConfig, _ *http.Client) (Provider, error) {
 
 func (p *emailProvider) Name() string { return "email" }
 
+// TLSRequired reports that this SMTP implementation refuses unencrypted delivery.
+func (p *emailProvider) TLSRequired() bool { return true }
+
 func (p *emailProvider) Send(ctx context.Context, req *SendRequest) (*SendResponse, error) {
-	if req.To == "" {
+	if address, err := mail.ParseAddress(req.To); err != nil || address.Address != req.To || strings.ContainsAny(req.To+req.Subject, "\r\n") {
 		return nil, fmt.Errorf("simplemessage: email Send requires To")
 	}
 	code, subject, body := prepareMessage(req)
@@ -60,7 +66,7 @@ func (p *emailProvider) sendEmail(ctx context.Context, to, subject, body string)
 	if hostPort == "" {
 		hostPort = "smtp.gmail.com:587"
 	}
-	host, _, err := splitHostPort(hostPort)
+	host, port, err := net.SplitHostPort(hostPort)
 	if err != nil {
 		return fmt.Errorf("simplemessage: email host %q: %w", hostPort, err)
 	}
@@ -79,6 +85,25 @@ func (p *emailProvider) sendEmail(ctx context.Context, to, subject, body string)
 	if err != nil {
 		return fmt.Errorf("simplemessage: email dial %s: %w", hostPort, err)
 	}
+	defer conn.Close()
+	deadline := time.Now().Add(30 * time.Second)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	if err := conn.SetDeadline(deadline); err != nil {
+		return fmt.Errorf("simplemessage: email deadline: %w", err)
+	}
+	rawConn := conn
+	stop := context.AfterFunc(ctx, func() { rawConn.Close() })
+	defer stop()
+	tlsConfig := &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}
+	if port == "465" {
+		secure := tls.Client(conn, tlsConfig)
+		if err := secure.HandshakeContext(ctx); err != nil {
+			return fmt.Errorf("simplemessage: email TLS: %w", err)
+		}
+		conn = secure
+	}
 	c, err := smtp.NewClient(conn, host)
 	if err != nil {
 		conn.Close()
@@ -86,6 +111,14 @@ func (p *emailProvider) sendEmail(ctx context.Context, to, subject, body string)
 	}
 	defer c.Close()
 
+	if port != "465" {
+		if ok, _ := c.Extension("STARTTLS"); !ok {
+			return fmt.Errorf("simplemessage: email requires STARTTLS")
+		}
+		if err := c.StartTLS(tlsConfig); err != nil {
+			return fmt.Errorf("simplemessage: email STARTTLS: %w", err)
+		}
+	}
 	if auth != nil {
 		if err := c.Auth(auth); err != nil {
 			return fmt.Errorf("simplemessage: email auth: %w", err)
@@ -111,20 +144,12 @@ func (p *emailProvider) sendEmail(ctx context.Context, to, subject, body string)
 	return nil
 }
 
-func splitHostPort(hostPort string) (string, string, error) {
-	idx := strings.LastIndex(hostPort, ":")
-	if idx < 0 {
-		return hostPort, "", nil
-	}
-	return hostPort[:idx], hostPort[idx+1:], nil
-}
-
 // buildMIMEMessage renders a minimal RFC 5322 message with UTF-8 content type.
 func buildMIMEMessage(from, to, subject, body string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "From: %s\r\n", from)
 	fmt.Fprintf(&b, "To: %s\r\n", to)
-	fmt.Fprintf(&b, "Subject: %s\r\n", subject)
+	fmt.Fprintf(&b, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", subject))
 	fmt.Fprintf(&b, "MIME-Version: 1.0\r\n")
 	fmt.Fprintf(&b, "Content-Type: text/plain; charset=UTF-8\r\n")
 	fmt.Fprintf(&b, "Content-Transfer-Encoding: 8bit\r\n")

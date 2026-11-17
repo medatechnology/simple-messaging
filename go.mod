@@ -10,5 +10,3 @@ require (
 	github.com/lithammer/shortuuid/v4 v4.2.0 // indirect
 	golang.org/x/crypto v0.37.0 // indirect
 )
-
-replace github.com/medatechnology/goutil => ../goutil

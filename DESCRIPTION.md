@@ -41,3 +41,27 @@ SMS), **Telegram**.
   `simplemessage`. Deps: `medatechnology/goutil` only.
 - Verification: `go build ./...`, `go vet ./...`, `go test ./...` (httptest
   fixtures; no live provider keys).
+
+## SMTP transport security
+
+Email requires encrypted transport: implicit TLS on port 465, STARTTLS on other
+ports. Server certificates are verified and TLS 1.2 is the minimum. Servers that
+do not advertise STARTTLS are rejected. SMTP username is `APIKey`, password is
+`SecretKey`, sender address is `From`, and `BaseURL` is `host:port`.
+
+Connections have a 10-second dial timeout and a 30-second total SMTP deadline,
+shortened by the caller's context deadline. Context cancellation closes the
+connection during SMTP operations. From/To must be single mailbox addresses;
+CR/LF in header fields is rejected. Subjects are UTF-8 MIME encoded when needed.
+The email provider exposes `TLSRequired() bool` for consumers that must reject
+older implementations lacking mandatory encryption.
+
+For an existing verification link, call `SendMessage` with
+`MessageTypeNotification`, a subject, and the complete text body. The verification
+message type currently formats an OTP and can replace a body without `{code}`.
+The caller owns token generation, storage, expiry, and validation. SMTP acceptance
+is not confirmation of inbox delivery and retries can cause duplicate email.
+
+The module resolves its published `goutil` dependency without a sibling checkout.
+For local consumer development, use `go work` instead of committing local replace
+paths. Publish a library version before consumers pin transport fixes in go.mod.
