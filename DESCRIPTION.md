@@ -65,3 +65,17 @@ is not confirmation of inbox delivery and retries can cause duplicate email.
 The module resolves its published `goutil` dependency without a sibling checkout.
 For local consumer development, use `go work` instead of committing local replace
 paths. Publish a library version before consumers pin transport fixes in go.mod.
+
+## Email sender display names
+
+The email provider's existing `From` configuration accepts a single RFC 5322
+mailbox, either a bare address or a display name followed by the address. For
+example, `Example Billing <billing@example.com>` sets a recognizable header while
+SMTP MAIL FROM uses only `billing@example.com`. No brand name is hardcoded.
+
+The library parses and formats names using Go's `net/mail`, including Unicode
+MIME encoding and quoting for commas or quotation marks. Bare-address inputs keep
+the address-only header. Raw CR/LF and CR/LF decoded from MIME display names are
+rejected when constructing the provider. Subject/body and TLS behavior are
+unchanged. This option applies only to the email provider; other channel meanings
+of `From` remain unchanged.

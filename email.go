@@ -16,24 +16,34 @@ import (
 )
 
 // emailProvider delivers messages via SMTP.
-// Config: From = sender address, APIKey = SMTP username, SecretKey = SMTP
+// Config: From = sender mailbox (optional display name), APIKey = SMTP username, SecretKey = SMTP
 // password, BaseURL = "host:port" (default smtp.gmail.com:587).
 func init() {
 	Register("email", newEmailProvider)
 }
 
 type emailProvider struct {
-	cfg ProviderConfig
+	cfg        ProviderConfig
+	fromHeader string
 }
 
 func newEmailProvider(cfg ProviderConfig, _ *http.Client) (Provider, error) {
 	if cfg.From == "" {
 		return nil, fmt.Errorf("simplemessage: email requires From (sender address)")
 	}
-	if address, err := mail.ParseAddress(cfg.From); err != nil || address.Address != cfg.From || strings.ContainsAny(cfg.From, "\r\n") {
+	address, err := mail.ParseAddress(cfg.From)
+	if err != nil || strings.ContainsAny(cfg.From, "\r\n") {
 		return nil, fmt.Errorf("simplemessage: email From must be a valid address, got %q", cfg.From)
 	}
-	return &emailProvider{cfg: cfg}, nil
+	if strings.ContainsAny(address.Name+address.Address, "\r\n") {
+		return nil, fmt.Errorf("simplemessage: email From must not contain CR or LF")
+	}
+	header := address.Address
+	if address.Name != "" {
+		header = address.String()
+	}
+	cfg.From = address.Address
+	return &emailProvider{cfg: cfg, fromHeader: header}, nil
 }
 
 func (p *emailProvider) Name() string { return "email" }
@@ -71,7 +81,7 @@ func (p *emailProvider) sendEmail(ctx context.Context, to, subject, body string)
 		return fmt.Errorf("simplemessage: email host %q: %w", hostPort, err)
 	}
 
-	msg := buildMIMEMessage(p.cfg.From, to, subject, body)
+	msg := buildMIMEMessage(p.fromHeader, to, subject, body)
 
 	var auth smtp.Auth
 	if p.cfg.APIKey != "" || p.cfg.SecretKey != "" {

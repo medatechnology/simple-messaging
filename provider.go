@@ -12,7 +12,7 @@ type ProviderConfig struct {
 	Channel   string // "email" | "whatsapp" | "sms" | "telegram"
 	APIKey    string // vendor token / SMTP password / Meta access token
 	SecretKey string // extra secret (Meta app secret, webhook token)
-	From      string // email sender address / WhatsApp phone-number-id / bot token
+	From      string // email sender mailbox (optional name) / WhatsApp phone-number-id / bot token
 	Sandbox   bool
 	// BaseURL overrides the default API base URL (mainly for tests/proxies).
 	BaseURL string
@@ -21,7 +21,7 @@ type ProviderConfig struct {
 // Config configures the simplemessage Client.
 type Config struct {
 	// Providers maps channel name -> provider config. At least one entry.
-	Providers map[string]ProviderConfig
+	Providers  map[string]ProviderConfig
 	HTTPClient *http.Client
 }
 
